@@ -2,11 +2,17 @@ import configparser
 import os
 import tkinter as tk
 from random import randint
+from tkinter import filedialog
+import threading
+import search_status
+from tkinter import messagebox
 
 PROGRAMM_NAME = 'Dateisucher'
 MAX_DIRECTORIES = 40
 LISTBOX_WIDTH = 130
 UNIQUE_RESULTS = False
+MAX_RESULTS = 500
+
 
 
 class UserInterface:
@@ -17,8 +23,8 @@ class UserInterface:
         self.main_window.title(PROGRAMM_NAME)
         self.main_window.config(padx=25, pady=25)
         self.main_window.protocol('', self.stop_program)
-        self.distance_label = tk.Label(self.main_window, bg='light grey')
-        self.distance_label.grid(row=49, column=0, pady=20)
+        #self.distance_label = tk.Label(self.main_window, bg='light grey')
+        #self.distance_label.grid(row=49, column=0, pady=20)
         self.exit_button = tk.Button(self.main_window, width=20)
         self.exit_button.config(text='Beenden', command=self.stop_program)
         self.exit_button.grid(row=50, column=2, pady=5)
@@ -57,8 +63,16 @@ class UserInterface:
         self.search_entry = tk.Entry(self.main_window, width=50)
         self.search_entry.grid(row=MAX_DIRECTORIES+2, column=0, padx=5, pady=10)
         self.search_button = tk.Button(width=20)
-        self.search_button.config(text='Suchen', command=self.search)
+        self.search_button.config(text='Suchen', command=self.thread_search)
         self.search_button.grid(row=MAX_DIRECTORIES+2, column=1, padx=5, pady=10)
+
+        self.search_status = tk.Text(self.main_window, width=30, height=5)
+        self.search_status.grid(row=MAX_DIRECTORIES+3, column=1, padx=5, pady=5)
+        self.status = search_status.SearchStatus()
+        self.status_update()
+        self.cancel_search = tk.Button(width=20)
+        self.cancel_search.config(text='Suche abbrechen', command=self.status.search_off)
+        self.cancel_search.grid(row=MAX_DIRECTORIES + 4, column=1, padx=5, pady=10)
         ########## Suche ###############
 
         ############### Pfade ###############
@@ -77,7 +91,7 @@ class UserInterface:
         index_result = str(self.search_results.curselection()[0])
         item_to_open = self.search_results.get(index_result)
         item_to_open_file = item_to_open
-        if UNIQUE_RESULTS:
+        if self.unique_results:
             for key in self.chronik_lst['VERLAUF']:#find key
                 if item_to_open.lower() == key.split(' ##+##% ')[0].lower():
                     item_to_open_file = self.chronik_lst['VERLAUF'][key]
@@ -96,8 +110,10 @@ class UserInterface:
         #for i in self.result_lst:
         #   self.search_results.insert(0,i.replace('/','\\'))
         results_found = False
-        if not UNIQUE_RESULTS:
+        if not self.unique_results:
             for i in self.result_lst:
+                # if not self.status.search_ongoing:
+                #     return
                 if i.split('.')[-1].lower() in self.format_lst or self.config_lst['ALL_FORMATS']['key'] == '1':
                     self.search_results.insert(0, i.replace('/', '\\'))
 
@@ -119,8 +135,10 @@ class UserInterface:
                 new_key = str(hex(a))
                 self.chronik_lst['VERLAUF'][new_key] = f'######### Treffer für "{self.search_entry.get()}" in den Formaten {self.format_lst}#########'
 
-        if UNIQUE_RESULTS:
+        if self.unique_results:
             for i in self.result_lst:
+                # if not self.status.search_ongoing:
+                #     return
                 #print(i)
                 if i.split('.')[-1].lower() in self.format_lst or self.config_lst['ALL_FORMATS']['key'] == '1':
                     self.search_results.insert(0, i.split('/')[-1])
@@ -148,6 +166,13 @@ class UserInterface:
         with open('chronik.ini', 'w') as file:
             self.chronik_lst.write(file)
 
+    def thread_search(self):
+        self.status.toggle_search_status()
+        self.search_thread = threading.Thread(target=self.search)
+        self.search_thread.start()
+        #self.search_thread.terminate()
+
+
     def search(self):
         self.search_button.config(state=tk.DISABLED)
         self.search_item = self.search_entry.get().lower()
@@ -157,31 +182,49 @@ class UserInterface:
         # for i in self.search_folder_lst:
         #     print(i)
         self.result_lst = []
-
+        print(self.result_lst)
         self.searching_initial()
 
         self.update_listbox()
 
         self.search_button.config(state=tk.NORMAL)
+        self.status.search_off()
         #print(self.result_lst)
 
     def searching_initial(self):
 
         for path in self.search_folder_lst:  # all source paths
             #self.file_list[path] = []
+            if not self.status.search_ongoing:
+                return
             try:
                 item_lst = os.listdir(path)
                 for i in range(len(item_lst)):  # list content
+                    if not self.status.search_ongoing:
+                        messagebox.showinfo('info', 'Suche abgebrochen')
+                        return
                     item_lst[i] = path + '/' + item_lst[i]
                     if os.path.isfile(item_lst[i]) and self.search_item in item_lst[i].lower().split('/')[-1]:
                         self.result_lst.append(item_lst[i])
+                        self.status.files_found_func()
+                        self.status.files_checked_func()
+                    elif os.path.isfile(item_lst[i]):
+                        self.status.files_checked_func()
                     elif os.path.isdir(item_lst[i]):
                         self.find_all_recursiv(item_lst[i], path)
+                        self.status.directory_checked()
             except:
                 pass
             # Hier muss noch die Fehlermeldung rein
 
     def find_all_recursiv(self, cur_directory, path):
+        if len(self.result_lst) > self.max_results:
+            #messagebox.showinfo('info', 'Zu viele Treffer\nSuche abgebrochen')
+            self.status.search_off()
+            print(self.status.search_ongoing)
+
+        if not self.status.search_ongoing:
+            return
         try:
             dir_content = os.listdir(cur_directory)
             for i in range(len(dir_content)):
@@ -189,8 +232,13 @@ class UserInterface:
                 try:
                     if os.path.isfile(dir_content[i]) and self.search_item in dir_content[i].lower().split('/')[-1]:
                         self.result_lst.append(dir_content[i])
+                        self.status.files_found_func()
+                        self.status.files_checked_func()
+                    elif os.path.isfile(dir_content[i]):
+                        self.status.files_checked_func()
                     elif os.path.isdir(dir_content[i]):
                         self.find_all_recursiv(dir_content[i], path)
+                        self.status.directory_checked()
                 except:
                     pass
         except PermissionError:
@@ -221,6 +269,12 @@ class UserInterface:
         self.folder_lst = []
         for path in self.config_lst['PATHS']:
             self.folder_lst.append(self.config_lst['PATHS'][path])
+
+        self.max_results = int(self.config_lst['SETTINGS']['max_results'])
+        if self.config_lst['SETTINGS']['unique_results'] == 'True':
+            self.unique_results = True
+        else:
+            self.unique_results = False
 
     def stop_program(self):
         self.main_window.destroy()
@@ -264,7 +318,7 @@ class UserInterface:
             self.button_all_formats = tk.Button(self.file_formats, width=15)
             self.button_all_formats.config(text='Alle Formate', command=self.change_all_format_value)
             self.button_all_formats.grid(row=39, column=0, pady=10, padx=10)
-            self.label_all_formats = tk.Label(self.file_formats, text='a')
+            self.label_all_formats = tk.Label(self.file_formats, text='a', width=20)
             self.label_all_formats.grid(row=39, column=2, pady=10, padx=10)
 
             self.update_labels()
@@ -296,7 +350,7 @@ class UserInterface:
         os.system(f'start readme.txt')
 
     def create_change_button(self, row, format, value):
-        self.button_lst.append([tk.Label(self.file_formats,text='a')])
+        self.button_lst.append([tk.Label(self.file_formats,text='a', width=20)])
         self.button_lst[-1][0].grid(row=row, column=2, pady=10, padx=10)
 
         self.button_lst[-1][0]['text'] = '2'
@@ -311,14 +365,18 @@ class UserInterface:
         for i in range(len(self.button_lst)):
             if self.config_lst['FORMATS'][self.formats[i]]=='1':
                 self.button_lst[i][0]['text'] = 'wird angezeigt'
+                self.button_lst[i][0].config(bg='green')
 
             if self.config_lst['FORMATS'][self.formats[i]]=='0':
                 self.button_lst[i][0]['text'] = 'ausgeblendet'
+                self.button_lst[i][0].config(bg='red')
 
         if self.config_lst['ALL_FORMATS']['key'] == '1':
             self.label_all_formats['text'] = 'Ja'
+            self.label_all_formats.config(bg='green')
         else:
             self.label_all_formats['text'] = 'Nein'
+            self.label_all_formats.config(bg='red')
 
     def change_format_value(self, index):
         if self.config_lst['FORMATS'][self.formats[index]]=='1':
@@ -361,6 +419,10 @@ class UserInterface:
             self.add_directory_entry = tk.Entry(self.directory_window, width=100)
             self.add_directory_entry.grid(row=0, column=1, padx=10, pady=5)
 
+            self.browse_button = tk.Button(self.directory_window, command=self.browse, width=30, text='Ordner auswählen')
+            self.browse_button.grid(row=2, column=0, padx=10, pady=5)
+
+
             self.directory_window.mainloop()
 
     def add_new_path(self):
@@ -372,17 +434,22 @@ class UserInterface:
             self.save_config()
             self.restart_program()
 
+    def browse(self):
+        file_path = filedialog.askdirectory()
+        self.add_directory_entry.delete(0, 'end')
+        self.add_directory_entry.insert(0, file_path)
+
     def load_chronik(self):
         try:
             self.chronik_lst = configparser.ConfigParser()
             self.chronik_lst.read('chronik.ini')
 
 
-            if not UNIQUE_RESULTS:
+            if not self.unique_results:
                 for key in self.chronik_lst['VERLAUF']:
                     self.search_results.insert(0, self.chronik_lst['VERLAUF'][key])
 
-            if UNIQUE_RESULTS:
+            if self.unique_results:
                 for key in self.chronik_lst['VERLAUF']:
                     self.search_results.insert(0, self.chronik_lst['VERLAUF'][key].split('\\')[-1])
         except KeyError:
@@ -396,3 +463,8 @@ class UserInterface:
         with open('chronik.ini', 'w') as file:
             file.writelines(clear)
         self.restart_program()
+
+    def status_update(self):
+        self.search_status.delete(1.0,'end')
+        self.search_status.insert(1.0,self.status.get_status())
+        self.main_window.after(100, func=self.status_update)
