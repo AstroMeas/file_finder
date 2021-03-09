@@ -7,7 +7,7 @@ program = 'main.py'
 
 
 with open('start_file_finder.bat', 'w') as auto:
-    auto.write(rf"python {working_directory}\{program}")
+    auto.write(rf"start {working_directory}\{program}")
 
 
 
