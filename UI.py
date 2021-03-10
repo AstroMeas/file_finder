@@ -48,6 +48,8 @@ class UserInterface:
         self.open_button = tk.Button(self.main_window, width=20)
         self.open_button.config(text='Öffnen', command=self.open_result)
         self.open_button.grid(row=MAX_DIRECTORIES+2, column=2, padx=5, pady=10)
+        self.lst_scroll = tk.Scrollbar(self.main_window, orient=tk.VERTICAL, command=self.search_results.yview)
+        self.lst_scroll.grid(row=MAX_DIRECTORIES+1, column=4, sticky='nsw')
         self.result_lst = []
         self.load_chronik()
         ############### Ergebnisse ###############
